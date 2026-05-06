@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "healthfam",
+    "slug": "healthfam",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.healthfam.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.healthfam.app",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#FF5A5F"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "헬스 인증 사진을 업로드하기 위해 사진 접근 권한이 필요합니다.",
+          "cameraPermission": "헬스 인증 사진을 찍기 위해 카메라 접근 권한이 필요합니다."
+        }
+      ]
+    ],
+    "scheme": "healthfam",
+    "extra": {
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
+    }
+  }
+}
