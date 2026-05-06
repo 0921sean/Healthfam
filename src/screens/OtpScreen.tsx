@@ -13,12 +13,12 @@ import {
 import { supabase } from '../lib/supabase';
 
 interface Props {
-  phone: string;
+  phone: string;  // 실제로는 email을 받음 (AppNavigator 호환)
   onVerified: () => void;
   onBack: () => void;
 }
 
-export function OtpScreen({ phone, onVerified, onBack }: Props) {
+export function OtpScreen({ phone: email, onVerified, onBack }: Props) {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -30,9 +30,9 @@ export function OtpScreen({ phone, onVerified, onBack }: Props) {
 
     setLoading(true);
     const { error } = await supabase.auth.verifyOtp({
-      phone,
+      email,
       token: otp,
-      type: 'sms',
+      type: 'email',
     });
     setLoading(false);
 
@@ -54,7 +54,7 @@ export function OtpScreen({ phone, onVerified, onBack }: Props) {
         </TouchableOpacity>
 
         <Text style={styles.title}>인증번호 입력</Text>
-        <Text style={styles.subtitle}>{phone}로 보낸 6자리 번호를 입력해주세요.</Text>
+        <Text style={styles.subtitle}>{email}로 보낸{'\n'}6자리 번호를 입력해주세요.</Text>
 
         <TextInput
           style={styles.input}

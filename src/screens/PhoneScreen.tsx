@@ -13,31 +13,32 @@ import {
 import { supabase } from '../lib/supabase';
 
 interface Props {
-  onOtpSent: (phone: string) => void;
+  onOtpSent: (email: string) => void;
 }
 
 export function PhoneScreen({ onOtpSent }: Props) {
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function sendOtp() {
-    const cleaned = phone.replace(/[^0-9]/g, '');
-    if (cleaned.length < 10) {
-      Alert.alert('오류', '올바른 휴대폰 번호를 입력해주세요.');
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.includes('@')) {
+      Alert.alert('오류', '올바른 이메일 주소를 입력해주세요.');
       return;
     }
-    // 한국 번호 → E.164 형식
-    const e164 = '+82' + (cleaned.startsWith('0') ? cleaned.slice(1) : cleaned);
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone: e164 });
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { shouldCreateUser: true },
+    });
     setLoading(false);
 
     if (error) {
       Alert.alert('오류', error.message);
       return;
     }
-    onOtpSent(e164);
+    onOtpSent(trimmed);
   }
 
   return (
@@ -47,17 +48,18 @@ export function PhoneScreen({ onOtpSent }: Props) {
     >
       <View style={styles.inner}>
         <Text style={styles.logo}>🏋️ healthfam</Text>
-        <Text style={styles.title}>휴대폰 번호로 시작하기</Text>
-        <Text style={styles.subtitle}>번호를 입력하면 인증 문자를 보내드려요.</Text>
+        <Text style={styles.title}>이메일로 시작하기</Text>
+        <Text style={styles.subtitle}>이메일을 입력하면 인증 코드를 보내드려요.</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="010-0000-0000"
+          placeholder="이메일 주소 입력"
           placeholderTextColor="#aaa"
-          keyboardType="phone-pad"
-          value={phone}
-          onChangeText={setPhone}
-          maxLength={13}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          value={email}
+          onChangeText={setEmail}
+          autoFocus
         />
 
         <TouchableOpacity
@@ -68,7 +70,7 @@ export function PhoneScreen({ onOtpSent }: Props) {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>인증 문자 받기</Text>
+            <Text style={styles.buttonText}>인증 코드 받기</Text>
           )}
         </TouchableOpacity>
       </View>

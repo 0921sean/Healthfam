@@ -16,6 +16,7 @@ import { PenaltyScreen } from '../screens/PenaltyScreen';
 import { CreateGroupScreen } from '../screens/CreateGroupScreen';
 import { JoinGroupScreen } from '../screens/JoinGroupScreen';
 import { ExemptionRequestScreen } from '../screens/ExemptionRequestScreen';
+import { LandingScreen } from '../screens/LandingScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -63,6 +64,7 @@ export function AppNavigator() {
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState('');
+  const [landingMode, setLandingMode] = useState<'choose' | 'create' | 'join'>('choose');
 
   // 딥링크: healthfam://join?code=ABC123
   useEffect(() => {
@@ -79,6 +81,14 @@ export function AppNavigator() {
       setInviteCode(String(parsed.queryParams.code));
     }
   }
+
+  // 로그아웃 시 상태 초기화
+  useEffect(() => {
+    if (!userId) {
+      setLandingMode('choose');
+      setActiveGroupId(null);
+    }
+  }, [userId]);
 
   // 세션 있으면 프로필 확인
   useEffect(() => {
@@ -147,7 +157,7 @@ export function AppNavigator() {
             )}
           </Stack.Screen>
         ) : activeGroupId === 'none' ? (
-          // 그룹 없음 → 만들기 or 참여
+          // 그룹 없음 → 딥링크 초대 코드가 있으면 바로 참여, 없으면 선택 화면
           inviteCode ? (
             <Stack.Screen name="Join">
               {() => (
@@ -158,12 +168,30 @@ export function AppNavigator() {
                 />
               )}
             </Stack.Screen>
-          ) : (
+          ) : landingMode === 'create' ? (
             <Stack.Screen name="CreateGroup">
               {() => (
                 <CreateGroupScreen
                   userId={userId!}
                   onCreated={setActiveGroupId}
+                />
+              )}
+            </Stack.Screen>
+          ) : landingMode === 'join' ? (
+            <Stack.Screen name="Join">
+              {() => (
+                <JoinGroupScreen
+                  userId={userId!}
+                  onJoined={(gid) => { setActiveGroupId(gid); setLandingMode('choose'); }}
+                />
+              )}
+            </Stack.Screen>
+          ) : (
+            <Stack.Screen name="Landing">
+              {() => (
+                <LandingScreen
+                  onCreateGroup={() => setLandingMode('create')}
+                  onJoinGroup={() => setLandingMode('join')}
                 />
               )}
             </Stack.Screen>
