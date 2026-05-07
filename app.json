@@ -22,14 +22,12 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.healthfam.app",
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "permissions": []
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router",
       [
         "expo-notifications",
         {
@@ -48,7 +46,7 @@
     "scheme": "healthfam",
     "extra": {
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "761d8f5b-8e18-4ab8-bfc9-3f1710260a54"
       }
     }
   }
