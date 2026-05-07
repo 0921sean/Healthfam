@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/cheonseungbeom/Desktop/CSB/MyApps/**)",
+      "Bash(mv healthfam/design.md /tmp/healthfam-design.md)",
+      "Bash(npx create-expo-app@latest healthfam --template blank-typescript --yes)",
+      "Bash(npx create-expo-app@latest . --template blank-typescript --yes)",
+      "Bash(mkdir -p /Users/cheonseungbeom/Desktop/CSB/MyApps/healthfam/.claude)",
+      "Bash(cp /tmp/healthfam-settings.json /Users/cheonseungbeom/Desktop/CSB/MyApps/healthfam/.claude/settings.local.json)",
+      "Bash(cp /tmp/healthfam-design.md /Users/cheonseungbeom/Desktop/CSB/MyApps/healthfam/design.md)",
+      "Bash(npx expo *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
