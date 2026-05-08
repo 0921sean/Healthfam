@@ -23,8 +23,8 @@ export function OtpScreen({ phone: email, onVerified, onBack }: Props) {
   const [loading, setLoading] = useState(false);
 
   async function verifyOtp() {
-    if (otp.length < 6) {
-      Alert.alert('오류', '6자리 인증번호를 입력해주세요.');
+    if (otp.length < 8) {
+      Alert.alert('오류', '8자리 인증번호를 입력해주세요.');
       return;
     }
 
@@ -58,12 +58,12 @@ export function OtpScreen({ phone: email, onVerified, onBack }: Props) {
 
         <TextInput
           style={styles.input}
-          placeholder="000000"
+          placeholder="00000000"
           placeholderTextColor="#aaa"
           keyboardType="number-pad"
           value={otp}
           onChangeText={setOtp}
-          maxLength={6}
+          maxLength={8}
           autoFocus
         />
 
