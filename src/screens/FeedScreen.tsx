@@ -87,51 +87,52 @@ export function FeedScreen({ groupId, userId }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, [load, groupId]);
 
-  async function pickAndUpload(useCamera: boolean) {
-    if (useCamera) {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('권한 필요', '카메라 접근 권한이 필요해요.');
-        return;
-      }
-    } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('권한 필요', '갤러리 접근 권한이 필요해요.');
-        return;
-      }
+  async function uploadCheckin() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('권한 필요', '갤러리 접근 권한이 필요해요.');
+      return;
     }
 
-    const result = useCamera
-      ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true });
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+    });
 
     if (result.canceled || !result.assets[0]) return;
 
     setUploading(true);
     const asset = result.assets[0];
-    const ext = asset.mimeType?.split('/')[1]?.toLowerCase() ?? 'jpeg';
+    const contentType = asset.mimeType ?? 'image/jpeg';
+    const ext = contentType.split('/')[1]?.toLowerCase() ?? 'jpeg';
     const path = `${groupId}/${userId}/${Date.now()}.${ext}`;
 
-    // base64 → ArrayBuffer (React Native에서 blob보다 안정적)
-    const base64 = asset.base64!;
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
+    // Supabase Storage REST API 직접 호출 (JS 클라이언트 우회)
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
 
-    const { error: uploadError } = await supabase.storage
-      .from('checkin-photos')
-      .upload(path, bytes.buffer, { contentType: asset.mimeType ?? 'image/jpeg' });
+    const fileResponse = await fetch(asset.uri);
+    const blob = await fileResponse.blob();
 
-    if (uploadError) {
+    const uploadResponse = await fetch(
+      `https://zpecibjusddegwdfowep.supabase.co/storage/v1/object/checkin-photos/${path}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': contentType,
+        },
+        body: blob,
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      const errText = await uploadResponse.text();
       setUploading(false);
-      Alert.alert('업로드 실패', `코드: ${uploadError.message}`);
+      Alert.alert('업로드 실패', errText);
       return;
     }
 
-    // 비공개 버킷: path만 저장, 조회 시 signed URL 생성
     const { error: insertError } = await supabase.from('checkins').insert({
       group_id: groupId,
       user_id: userId,
@@ -143,19 +144,11 @@ export function FeedScreen({ groupId, userId }: Props) {
     setUploading(false);
 
     if (insertError) {
-      Alert.alert('오류', '인증 등록에 실패했어요.');
+      Alert.alert('오류', `인증 등록 실패: ${insertError.message}`);
       return;
     }
 
     load();
-  }
-
-  function uploadCheckin() {
-    Alert.alert('사진 인증', '사진을 어떻게 추가할까요?', [
-      { text: '카메라로 촬영', onPress: () => pickAndUpload(true) },
-      { text: '갤러리에서 선택', onPress: () => pickAndUpload(false) },
-      { text: '취소', style: 'cancel' },
-    ]);
   }
 
   async function shareInvite() {
