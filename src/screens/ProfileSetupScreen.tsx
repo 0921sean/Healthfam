@@ -34,7 +34,7 @@ export function ProfileSetupScreen({ userId, onComplete }: Props) {
     setLoading(false);
 
     if (error) {
-      Alert.alert('오류', '프로필 저장에 실패했어요.');
+      Alert.alert('오류', `프로필 저장 실패\n코드: ${error.code}\n메시지: ${error.message}`);
       return;
     }
     onComplete();
