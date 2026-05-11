@@ -103,26 +103,31 @@ export function FeedScreen({ groupId, userId }: Props) {
     }
 
     const result = useCamera
-      ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.7 })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7 });
+      ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true });
 
     if (result.canceled || !result.assets[0]) return;
 
     setUploading(true);
     const asset = result.assets[0];
-    const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const ext = asset.mimeType?.split('/')[1]?.toLowerCase() ?? 'jpeg';
     const path = `${groupId}/${userId}/${Date.now()}.${ext}`;
 
-    const response = await fetch(asset.uri);
-    const blob = await response.blob();
+    // base64 → ArrayBuffer (React Native에서 blob보다 안정적)
+    const base64 = asset.base64!;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
 
     const { error: uploadError } = await supabase.storage
       .from('checkin-photos')
-      .upload(path, blob, { contentType: `image/${ext}` });
+      .upload(path, bytes.buffer, { contentType: asset.mimeType ?? 'image/jpeg' });
 
     if (uploadError) {
       setUploading(false);
-      Alert.alert('오류', '사진 업로드에 실패했어요.');
+      Alert.alert('업로드 실패', `코드: ${uploadError.message}`);
       return;
     }
 
