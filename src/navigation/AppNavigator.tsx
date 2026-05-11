@@ -174,6 +174,7 @@ export function AppNavigator() {
                 <CreateGroupScreen
                   userId={userId!}
                   onCreated={setActiveGroupId}
+                  onBack={() => setLandingMode('choose')}
                 />
               )}
             </Stack.Screen>
@@ -183,6 +184,7 @@ export function AppNavigator() {
                 <JoinGroupScreen
                   userId={userId!}
                   onJoined={(gid) => { setActiveGroupId(gid); setLandingMode('choose'); }}
+                  onBack={() => setLandingMode('choose')}
                 />
               )}
             </Stack.Screen>

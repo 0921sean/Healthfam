@@ -9,7 +9,7 @@ export function getCurrentWeek(): { week: number; year: number } {
 
   const startOfYear = new Date(Date.UTC(kst.getUTCFullYear(), 0, 1));
   const dayOfYear = Math.floor((kst.getTime() - startOfYear.getTime()) / 86400000);
-  const week = Math.ceil((dayOfYear + startOfYear.getUTCDay() + 1) / 7);
+  const week = Math.max(1, Math.ceil((dayOfYear + startOfYear.getUTCDay() + 1) / 7));
 
   return { week, year: kst.getUTCFullYear() };
 }

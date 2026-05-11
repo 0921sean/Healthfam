@@ -45,9 +45,28 @@ export function FeedScreen({ groupId, userId }: Props) {
 
     if (groupData) setGroup(groupData);
     if (feedData) {
-      const mapped = feedData.map((c: any) => ({
+      // 비공개 버킷이므로 signed URL 일괄 생성
+      const paths = feedData
+        .map((c: any) => {
+          const url: string = c.photo_url ?? '';
+          const marker = 'checkin-photos/';
+          const idx = url.indexOf(marker);
+          return idx >= 0 ? url.slice(idx + marker.length) : url;
+        });
+
+      const { data: signedData } = await supabase.storage
+        .from('checkin-photos')
+        .createSignedUrls(paths, 604800);
+
+      const signedMap: Record<string, string> = {};
+      (signedData ?? []).forEach((s, i) => {
+        if (s.signedUrl) signedMap[paths[i]] = s.signedUrl;
+      });
+
+      const mapped = feedData.map((c: any, i: number) => ({
         ...c,
         display_name: c.profiles?.display_name ?? '멤버',
+        photo_url: signedMap[paths[i]] ?? c.photo_url,
       }));
       setCheckins(mapped);
       setMyCount(mapped.filter((c: CheckIn) => c.user_id === userId).length);
@@ -68,34 +87,38 @@ export function FeedScreen({ groupId, userId }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, [load, groupId]);
 
-  async function uploadCheckin() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('권한 필요', '사진 업로드를 위해 갤러리 접근 권한이 필요해요.');
-      return;
+  async function pickAndUpload(useCamera: boolean) {
+    if (useCamera) {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '카메라 접근 권한이 필요해요.');
+        return;
+      }
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('권한 필요', '갤러리 접근 권한이 필요해요.');
+        return;
+      }
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.7 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7 });
 
     if (result.canceled || !result.assets[0]) return;
 
     setUploading(true);
     const asset = result.assets[0];
-    const ext = asset.uri.split('.').pop() ?? 'jpg';
+    const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
     const path = `${groupId}/${userId}/${Date.now()}.${ext}`;
 
     const response = await fetch(asset.uri);
     const blob = await response.blob();
-    const arrayBuffer = await new Response(blob).arrayBuffer();
 
     const { error: uploadError } = await supabase.storage
       .from('checkin-photos')
-      .upload(path, arrayBuffer, { contentType: `image/${ext}` });
+      .upload(path, blob, { contentType: `image/${ext}` });
 
     if (uploadError) {
       setUploading(false);
@@ -103,14 +126,11 @@ export function FeedScreen({ groupId, userId }: Props) {
       return;
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('checkin-photos')
-      .getPublicUrl(path);
-
+    // 비공개 버킷: path만 저장, 조회 시 signed URL 생성
     const { error: insertError } = await supabase.from('checkins').insert({
       group_id: groupId,
       user_id: userId,
-      photo_url: publicUrl,
+      photo_url: path,
       week_number: week,
       year,
     });
@@ -123,6 +143,14 @@ export function FeedScreen({ groupId, userId }: Props) {
     }
 
     load();
+  }
+
+  function uploadCheckin() {
+    Alert.alert('사진 인증', '사진을 어떻게 추가할까요?', [
+      { text: '카메라로 촬영', onPress: () => pickAndUpload(true) },
+      { text: '갤러리에서 선택', onPress: () => pickAndUpload(false) },
+      { text: '취소', style: 'cancel' },
+    ]);
   }
 
   async function shareInvite() {

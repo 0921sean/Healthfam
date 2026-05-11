@@ -17,7 +17,6 @@ export interface Member {
   user_id: string;
   role: 'admin' | 'member';
   display_name: string;
-  phone: string;
   joined_at: string;
 }
 

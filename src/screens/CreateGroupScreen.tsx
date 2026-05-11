@@ -17,9 +17,10 @@ import type { NotificationMode } from '../types';
 interface Props {
   userId: string;
   onCreated: (groupId: string) => void;
+  onBack?: () => void;
 }
 
-export function CreateGroupScreen({ userId, onCreated }: Props) {
+export function CreateGroupScreen({ userId, onCreated, onBack }: Props) {
   const [name, setName] = useState('');
   const [weeklyTarget, setWeeklyTarget] = useState('3');
   const [penaltyPerMiss, setPenaltyPerMiss] = useState('5000');
@@ -44,24 +45,34 @@ export function CreateGroupScreen({ userId, onCreated }: Props) {
     }
 
     setLoading(true);
-    const inviteCode = generateInviteCode();
 
-    const { data: group, error: groupError } = await supabase
-      .from('groups')
-      .insert({
-        name: name.trim(),
-        weekly_target: target,
-        penalty_per_miss: penalty,
-        mode,
-        created_by: userId,
-        invite_code: inviteCode,
-      })
-      .select()
-      .single();
+    // 초대 코드 충돌 시 최대 3회 재시도
+    let group = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const inviteCode = generateInviteCode();
+      const { data, error: groupError } = await supabase
+        .from('groups')
+        .insert({
+          name: name.trim(),
+          weekly_target: target,
+          penalty_per_miss: penalty,
+          mode,
+          created_by: userId,
+          invite_code: inviteCode,
+        })
+        .select()
+        .single();
+      if (!groupError && data) { group = data; break; }
+      if (groupError?.code !== '23505') {
+        setLoading(false);
+        Alert.alert('오류', '모임 생성에 실패했어요.');
+        return;
+      }
+    }
 
-    if (groupError || !group) {
+    if (!group) {
       setLoading(false);
-      Alert.alert('오류', '모임 생성에 실패했어요.');
+      Alert.alert('오류', '모임 생성에 실패했어요. 다시 시도해주세요.');
       return;
     }
 
@@ -72,12 +83,20 @@ export function CreateGroupScreen({ userId, onCreated }: Props) {
       .eq('id', userId)
       .single();
 
-    await supabase.from('members').insert({
+    const { error: memberError } = await supabase.from('members').insert({
       group_id: group.id,
       user_id: userId,
       role: 'admin',
       display_name: profile?.display_name ?? '방장',
     });
+
+    if (memberError) {
+      // 멤버 추가 실패 시 생성된 그룹도 삭제
+      await supabase.from('groups').delete().eq('id', group.id);
+      setLoading(false);
+      Alert.alert('오류', '모임 생성에 실패했어요. 다시 시도해주세요.');
+      return;
+    }
 
     setLoading(false);
     onCreated(group.id);
@@ -85,6 +104,11 @@ export function CreateGroupScreen({ userId, onCreated }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {onBack && (
+        <TouchableOpacity onPress={onBack} style={styles.back}>
+          <Text style={styles.backText}>← 뒤로</Text>
+        </TouchableOpacity>
+      )}
       <Text style={styles.title}>새 모임 만들기</Text>
 
       <Text style={styles.label}>모임 이름</Text>
@@ -174,6 +198,8 @@ export function CreateGroupScreen({ userId, onCreated }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   content: { paddingHorizontal: 24, paddingTop: 60, paddingBottom: 40 },
+  back: { marginBottom: 8 },
+  backText: { fontSize: 16, color: '#FF5A5F' },
   title: {
     fontSize: 22,
     fontWeight: '700',
