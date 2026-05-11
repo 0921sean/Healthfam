@@ -54,7 +54,7 @@ export function OtpScreen({ phone: email, onVerified, onBack }: Props) {
         </TouchableOpacity>
 
         <Text style={styles.title}>인증번호 입력</Text>
-        <Text style={styles.subtitle}>{email}로 보낸{'\n'}6자리 번호를 입력해주세요.</Text>
+        <Text style={styles.subtitle}>{email}로 보낸{'\n'}8자리 번호를 입력해주세요.</Text>
 
         <TextInput
           style={styles.input}
