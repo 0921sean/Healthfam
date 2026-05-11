@@ -28,9 +28,10 @@ export function ProfileSetupScreen({ userId, onComplete }: Props) {
     }
 
     setLoading(true);
+    // returning: 'minimal'로 INSERT 후 SELECT 생략 → members RLS 재귀 우회
     const { error } = await supabase
       .from('profiles')
-      .upsert({ id: userId, display_name: name.trim() });
+      .upsert({ id: userId, display_name: name.trim() }, { onConflict: 'id' });
     setLoading(false);
 
     if (error) {
