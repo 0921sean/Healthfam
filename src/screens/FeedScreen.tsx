@@ -16,6 +16,8 @@ import { supabase } from '../lib/supabase';
 import { getCurrentWeek } from '../lib/utils';
 import type { CheckIn, Group } from '../types';
 
+const EMOJIS = ['💪', '❤️', '😂'];
+
 interface Props {
   groupId: string;
   userId: string;
@@ -28,38 +30,39 @@ export function FeedScreen({ groupId, userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // reactions: { [checkinId]: { [emoji]: string[] (userIds) } }
+  const [reactions, setReactions] = useState<Record<string, Record<string, string[]>>>({});
 
   const { week, year } = getCurrentWeek();
 
   const load = useCallback(async () => {
-    const [{ data: groupData }, { data: feedData }, { data: membersData }] = await Promise.all([
+    const [{ data: groupData }, { data: feedData }, { data: membersData }, { data: reactionsData }] = await Promise.all([
       supabase.from('groups').select('*').eq('id', groupId).single(),
-      supabase
-        .from('checkins')
-        .select('*')
-        .eq('group_id', groupId)
-        .eq('week_number', week)
-        .eq('year', year)
-        .order('checked_at', { ascending: false }),
+      supabase.from('checkins').select('*').eq('group_id', groupId).eq('week_number', week).eq('year', year).order('checked_at', { ascending: false }),
       supabase.from('members').select('user_id, display_name').eq('group_id', groupId),
+      supabase.from('checkin_reactions').select('checkin_id, user_id, emoji'),
     ]);
 
     if (groupData) setGroup(groupData);
+
+    // 반응 매핑
+    const reactionMap: Record<string, Record<string, string[]>> = {};
+    (reactionsData ?? []).forEach((r: any) => {
+      if (!reactionMap[r.checkin_id]) reactionMap[r.checkin_id] = {};
+      if (!reactionMap[r.checkin_id][r.emoji]) reactionMap[r.checkin_id][r.emoji] = [];
+      reactionMap[r.checkin_id][r.emoji].push(r.user_id);
+    });
+    setReactions(reactionMap);
+
     if (feedData) {
-      // members에서 display_name 매핑 (profiles JOIN 제거 → RLS 재귀 우회)
       const nameMap: Record<string, string> = {};
       (membersData ?? []).forEach((m: any) => { nameMap[m.user_id] = m.display_name; });
 
-      // 비공개 버킷 signed URL 일괄 생성
       const paths = feedData.map((c: any) => c.photo_url ?? '');
       let signedMap: Record<string, string> = {};
       try {
-        const { data: signedData } = await supabase.storage
-          .from('checkin-photos')
-          .createSignedUrls(paths, 604800);
-        (signedData ?? []).forEach((s, i) => {
-          if (s.signedUrl) signedMap[paths[i]] = s.signedUrl;
-        });
+        const { data: signedData } = await supabase.storage.from('checkin-photos').createSignedUrls(paths, 604800);
+        (signedData ?? []).forEach((s, i) => { if (s.signedUrl) signedMap[paths[i]] = s.signedUrl; });
       } catch (_) {}
 
       const mapped = feedData.map((c: any) => ({
@@ -76,28 +79,18 @@ export function FeedScreen({ groupId, userId }: Props) {
 
   useEffect(() => {
     load();
-
-    // Realtime: 체크인 추가/삭제 감지
-    const channel = supabase
-      .channel(`feed-${groupId}`)
+    const channel = supabase.channel(`feed-${groupId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'checkins', filter: `group_id=eq.${groupId}` }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checkin_reactions' }, () => load())
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [load, groupId]);
 
   async function uploadCheckin() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('권한 필요', '갤러리 접근 권한이 필요해요.');
-      return;
-    }
+    if (status !== 'granted') { Alert.alert('권한 필요', '갤러리 접근 권한이 필요해요.'); return; }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.7,
-    });
-
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
     if (result.canceled || !result.assets[0]) return;
 
     setUploading(true);
@@ -106,75 +99,71 @@ export function FeedScreen({ groupId, userId }: Props) {
     const ext = contentType.split('/')[1]?.toLowerCase() ?? 'jpeg';
     const path = `${groupId}/${userId}/${Date.now()}.${ext}`;
 
-    // Supabase Storage REST API 직접 호출 (JS 클라이언트 우회)
     const session = await supabase.auth.getSession();
     const token = session.data.session?.access_token;
-
     const fileResponse = await fetch(asset.uri);
     const blob = await fileResponse.blob();
 
     const uploadResponse = await fetch(
       `https://zpecibjusddegwdfowep.supabase.co/storage/v1/object/checkin-photos/${path}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': contentType,
-        },
-        body: blob,
-      }
+      { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType }, body: blob }
     );
 
     if (!uploadResponse.ok) {
-      const errText = await uploadResponse.text();
       setUploading(false);
-      Alert.alert('업로드 실패', errText);
+      Alert.alert('업로드 실패', await uploadResponse.text());
       return;
     }
 
-    const { error: insertError } = await supabase.from('checkins').insert({
-      group_id: groupId,
-      user_id: userId,
-      photo_url: path,
-      week_number: week,
-      year,
-    });
-
+    const { error: insertError } = await supabase.from('checkins').insert({ group_id: groupId, user_id: userId, photo_url: path, week_number: week, year });
     setUploading(false);
-
-    if (insertError) {
-      Alert.alert('오류', `인증 등록 실패: ${insertError.message}`);
-      return;
-    }
-
+    if (insertError) { Alert.alert('오류', `인증 등록 실패: ${insertError.message}`); return; }
     load();
+  }
+
+  async function deleteCheckin(item: CheckIn) {
+    Alert.alert('사진 삭제', '이 인증 사진을 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제', style: 'destructive', onPress: async () => {
+          await supabase.storage.from('checkin-photos').remove([item.photo_url]);
+          await supabase.from('checkins').delete().eq('id', item.id);
+          load();
+        }
+      },
+    ]);
+  }
+
+  async function toggleReaction(checkinId: string, emoji: string) {
+    const myReactions = reactions[checkinId]?.[emoji] ?? [];
+    const alreadyReacted = myReactions.includes(userId);
+    if (alreadyReacted) {
+      await supabase.from('checkin_reactions').delete().eq('checkin_id', checkinId).eq('user_id', userId).eq('emoji', emoji);
+    } else {
+      await supabase.from('checkin_reactions').upsert({ checkin_id: checkinId, user_id: userId, emoji }, { onConflict: 'checkin_id,user_id' });
+    }
+    // 로컬 상태 즉시 업데이트
+    setReactions(prev => {
+      const next = { ...prev, [checkinId]: { ...(prev[checkinId] ?? {}) } };
+      const list = [...(next[checkinId][emoji] ?? [])];
+      if (alreadyReacted) {
+        next[checkinId][emoji] = list.filter(id => id !== userId);
+      } else {
+        next[checkinId][emoji] = [...list, userId];
+      }
+      return next;
+    });
   }
 
   async function shareInvite() {
     if (!group) return;
-    await Share.share({
-      message: `healthfam 모임 "${group.name}"에 초대합니다!\n초대 코드: ${group.invite_code}\n앱 설치 후 코드를 입력해주세요.`,
-    });
+    await Share.share({ message: `healthfam 모임 "${group.name}"에 초대합니다!\n초대 코드: ${group.invite_code}\n앱 설치 후 코드를 입력해주세요.` });
   }
 
-  async function flagCheckin(checkinId: string) {
-    await supabase.from('checkins').update({ flagged: true }).eq('id', checkinId);
-    load();
-  }
-
-  const isAdmin = group?.created_by === userId;
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#FF5A5F" />
-      </View>
-    );
-  }
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#FF5A5F" /></View>;
 
   return (
     <View style={styles.container}>
-      {/* 헤더 */}
       <View style={styles.header}>
         <View>
           <Text style={styles.groupName}>{group?.name ?? ''}</Text>
@@ -185,7 +174,6 @@ export function FeedScreen({ groupId, userId }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* 피드 */}
       <FlatList
         data={checkins}
         keyExtractor={(item) => item.id}
@@ -198,50 +186,47 @@ export function FeedScreen({ groupId, userId }: Props) {
             <Text style={styles.emptyText}>아직 이번 주 인증이 없어요. 첫 번째로 인증해보세요! 🏋️</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Image source={{ uri: item.photo_url }} style={styles.photo} />
-            {item.flagged && (
-              <View style={styles.flagBadge}>
-                <Text style={styles.flagText}>⚠️ 이의제기</Text>
+        renderItem={({ item }) => {
+          const isOwn = item.user_id === userId;
+          const checkinReactions = reactions[item.id] ?? {};
+          return (
+            <View style={styles.card}>
+              <Image source={{ uri: item.photo_url }} style={styles.photo} />
+
+              {/* 본인 사진: 삭제 버튼 */}
+              {isOwn && (
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteCheckin(item)}>
+                  <Text style={styles.deleteBtnText}>🗑</Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.cardFooter}>
+                <Text style={styles.cardName}>{item.display_name}</Text>
+                <Text style={styles.cardTime}>
+                  {new Date(item.checked_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                </Text>
               </View>
-            )}
-            <View style={styles.cardFooter}>
-              <Text style={styles.cardName}>{item.display_name}</Text>
-              <Text style={styles.cardTime}>
-                {new Date(item.checked_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
-              </Text>
+
+              {/* 감정 반응 */}
+              <View style={styles.reactionRow}>
+                {EMOJIS.map(emoji => {
+                  const count = (checkinReactions[emoji] ?? []).length;
+                  const reacted = (checkinReactions[emoji] ?? []).includes(userId);
+                  return (
+                    <TouchableOpacity key={emoji} style={[styles.reactionBtn, reacted && styles.reactionBtnActive]} onPress={() => toggleReaction(item.id, emoji)}>
+                      <Text style={styles.reactionEmoji}>{emoji}</Text>
+                      {count > 0 && <Text style={styles.reactionCount}>{count}</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-            {isAdmin && !item.flagged && (
-              <TouchableOpacity
-                style={styles.flagBtn}
-                onPress={() => Alert.alert(
-                  '이의 제기',
-                  `${item.display_name}님의 사진에 이의를 제기할까요?`,
-                  [
-                    { text: '취소', style: 'cancel' },
-                    { text: '제기', style: 'destructive', onPress: () => flagCheckin(item.id) },
-                  ]
-                )}
-              >
-                <Text style={styles.flagBtnText}>⚠️</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+          );
+        }}
       />
 
-      {/* 인증 버튼 */}
-      <TouchableOpacity
-        style={[styles.fab, uploading && styles.fabDisabled]}
-        onPress={uploadCheckin}
-        disabled={uploading}
-      >
-        {uploading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.fabText}>📸 인증하기</Text>
-        )}
+      <TouchableOpacity style={[styles.fab, uploading && styles.fabDisabled]} onPress={uploadCheckin} disabled={uploading}>
+        {uploading ? <ActivityIndicator color="#fff" /> : <Text style={styles.fabText}>📸 인증하기</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -251,95 +236,45 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9F9F9' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 60, paddingBottom: 16,
+    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee',
   },
   groupName: { fontSize: 18, fontWeight: '700', color: '#111' },
   weekLabel: { fontSize: 13, color: '#666', marginTop: 2 },
-  inviteBtn: {
-    borderWidth: 1.5,
-    borderColor: '#FF5A5F',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
+  inviteBtn: { borderWidth: 1.5, borderColor: '#FF5A5F', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6 },
   inviteBtnText: { color: '#FF5A5F', fontSize: 13, fontWeight: '600' },
   feedContent: { padding: 12, paddingBottom: 100 },
   columnWrapper: { gap: 12 },
   card: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    flex: 1, backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden', marginBottom: 12,
+    elevation: 1, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
   },
   photo: { width: '100%', aspectRatio: 1 },
-  flagBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    backgroundColor: '#fff3',
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  deleteBtn: {
+    position: 'absolute', top: 6, right: 6,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 14,
+    width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
   },
-  flagText: { fontSize: 11 },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 8,
-  },
+  deleteBtnText: { fontSize: 13 },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4 },
   cardName: { fontSize: 13, fontWeight: '600', color: '#111' },
   cardTime: { fontSize: 11, color: '#aaa' },
-  flagBtn: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
+  reactionRow: { flexDirection: 'row', paddingHorizontal: 6, paddingBottom: 8, gap: 4 },
+  reactionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    paddingHorizontal: 6, paddingVertical: 3,
+    backgroundColor: '#F5F5F5', borderRadius: 10,
   },
-  flagBtnText: { fontSize: 14 },
-  empty: {
-    paddingTop: 60,
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#aaa',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
+  reactionBtnActive: { backgroundColor: '#FFF0F0' },
+  reactionEmoji: { fontSize: 14 },
+  reactionCount: { fontSize: 11, color: '#666', fontWeight: '600' },
+  empty: { paddingTop: 60, alignItems: 'center', paddingHorizontal: 40 },
+  emptyText: { fontSize: 14, color: '#aaa', textAlign: 'center', lineHeight: 22 },
   fab: {
-    position: 'absolute',
-    bottom: 32,
-    left: 24,
-    right: 24,
-    backgroundColor: '#FF5A5F',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#FF5A5F',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    position: 'absolute', bottom: 32, left: 24, right: 24,
+    backgroundColor: '#FF5A5F', borderRadius: 14, paddingVertical: 16, alignItems: 'center',
+    elevation: 4, shadowColor: '#FF5A5F', shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
   },
   fabDisabled: { opacity: 0.6 },
   fabText: { color: '#fff', fontSize: 16, fontWeight: '700' },
