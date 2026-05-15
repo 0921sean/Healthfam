@@ -32,41 +32,40 @@ export function FeedScreen({ groupId, userId }: Props) {
   const { week, year } = getCurrentWeek();
 
   const load = useCallback(async () => {
-    const [{ data: groupData }, { data: feedData }] = await Promise.all([
+    const [{ data: groupData }, { data: feedData }, { data: membersData }] = await Promise.all([
       supabase.from('groups').select('*').eq('id', groupId).single(),
       supabase
         .from('checkins')
-        .select('*, profiles(display_name)')
+        .select('*')
         .eq('group_id', groupId)
         .eq('week_number', week)
         .eq('year', year)
         .order('checked_at', { ascending: false }),
+      supabase.from('members').select('user_id, display_name').eq('group_id', groupId),
     ]);
 
     if (groupData) setGroup(groupData);
     if (feedData) {
-      // 비공개 버킷이므로 signed URL 일괄 생성
-      const paths = feedData
-        .map((c: any) => {
-          const url: string = c.photo_url ?? '';
-          const marker = 'checkin-photos/';
-          const idx = url.indexOf(marker);
-          return idx >= 0 ? url.slice(idx + marker.length) : url;
+      // members에서 display_name 매핑 (profiles JOIN 제거 → RLS 재귀 우회)
+      const nameMap: Record<string, string> = {};
+      (membersData ?? []).forEach((m: any) => { nameMap[m.user_id] = m.display_name; });
+
+      // 비공개 버킷 signed URL 일괄 생성
+      const paths = feedData.map((c: any) => c.photo_url ?? '');
+      let signedMap: Record<string, string> = {};
+      try {
+        const { data: signedData } = await supabase.storage
+          .from('checkin-photos')
+          .createSignedUrls(paths, 604800);
+        (signedData ?? []).forEach((s, i) => {
+          if (s.signedUrl) signedMap[paths[i]] = s.signedUrl;
         });
+      } catch (_) {}
 
-      const { data: signedData } = await supabase.storage
-        .from('checkin-photos')
-        .createSignedUrls(paths, 604800);
-
-      const signedMap: Record<string, string> = {};
-      (signedData ?? []).forEach((s, i) => {
-        if (s.signedUrl) signedMap[paths[i]] = s.signedUrl;
-      });
-
-      const mapped = feedData.map((c: any, i: number) => ({
+      const mapped = feedData.map((c: any) => ({
         ...c,
-        display_name: c.profiles?.display_name ?? '멤버',
-        photo_url: signedMap[paths[i]] ?? c.photo_url,
+        display_name: nameMap[c.user_id] ?? '멤버',
+        photo_url: signedMap[c.photo_url] ?? c.photo_url,
       }));
       setCheckins(mapped);
       setMyCount(mapped.filter((c: CheckIn) => c.user_id === userId).length);
