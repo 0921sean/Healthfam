@@ -66,7 +66,8 @@ export function FeedScreen({ groupId, userId }: Props) {
       const mapped = feedData.map((c: any) => ({
         ...c,
         display_name: nameMap[c.user_id] ?? '멤버',
-        photo_url: signedMap[c.photo_url] ?? c.photo_url,
+        storage_path: c.photo_url,                          // 삭제용 원본 경로 보존
+        photo_url: signedMap[c.photo_url] ?? c.photo_url,  // 표시용 signed URL
       }));
       setCheckins(mapped);
       setMyCount(mapped.filter((c: CheckIn) => c.user_id === userId).length);
@@ -113,11 +114,12 @@ export function FeedScreen({ groupId, userId }: Props) {
     load();
   }
 
-  async function deleteCheckin(item: CheckIn) {
+  async function deleteCheckin(item: CheckIn & { storage_path?: string }) {
     Alert.alert('사진 삭제', '이 인증 사진을 삭제할까요?', [
       { text: '취소', style: 'cancel' },
       { text: '삭제', style: 'destructive', onPress: async () => {
-        await supabase.storage.from('checkin-photos').remove([item.photo_url]);
+        const path = item.storage_path ?? item.photo_url;
+        await supabase.storage.from('checkin-photos').remove([path]);
         await supabase.from('checkins').delete().eq('id', item.id);
         load();
       }},
