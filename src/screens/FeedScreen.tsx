@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase';
 import { getCurrentWeek } from '../lib/utils';
 import type { CheckIn, Group } from '../types';
 
-const EMOJIS = ['💪', '❤️', '😂'];
+const LIKE_EMOJI = '💪';
 
 interface Props {
   groupId: string;
@@ -124,17 +124,17 @@ export function FeedScreen({ groupId, userId }: Props) {
     ]);
   }
 
-  async function toggleReaction(checkinId: string, emoji: string) {
-    const alreadyReacted = (reactions[checkinId]?.[emoji] ?? []).includes(userId);
-    if (alreadyReacted) {
-      await supabase.from('checkin_reactions').delete().eq('checkin_id', checkinId).eq('user_id', userId).eq('emoji', emoji);
+  async function toggleLike(checkinId: string) {
+    const alreadyLiked = (reactions[checkinId]?.[LIKE_EMOJI] ?? []).includes(userId);
+    if (alreadyLiked) {
+      await supabase.from('checkin_reactions').delete().eq('checkin_id', checkinId).eq('user_id', userId).eq('emoji', LIKE_EMOJI);
     } else {
-      await supabase.from('checkin_reactions').upsert({ checkin_id: checkinId, user_id: userId, emoji }, { onConflict: 'checkin_id,user_id' });
+      await supabase.from('checkin_reactions').upsert({ checkin_id: checkinId, user_id: userId, emoji: LIKE_EMOJI }, { onConflict: 'checkin_id,user_id' });
     }
     setReactions(prev => {
       const next = { ...prev, [checkinId]: { ...(prev[checkinId] ?? {}) } };
-      const list = [...(next[checkinId][emoji] ?? [])];
-      next[checkinId][emoji] = alreadyReacted ? list.filter(id => id !== userId) : [...list, userId];
+      const list = [...(next[checkinId][LIKE_EMOJI] ?? [])];
+      next[checkinId][LIKE_EMOJI] = alreadyLiked ? list.filter(id => id !== userId) : [...list, userId];
       return next;
     });
   }
@@ -168,35 +168,30 @@ export function FeedScreen({ groupId, userId }: Props) {
         }
         renderItem={({ item }) => {
           const isOwn = item.user_id === userId;
-          const checkinReactions = reactions[item.id] ?? {};
+          const likeCount = (reactions[item.id]?.[LIKE_EMOJI] ?? []).length;
+          const liked = (reactions[item.id]?.[LIKE_EMOJI] ?? []).includes(userId);
           return (
             <View style={styles.card}>
               <Image source={{ uri: item.photo_url }} style={styles.photo} resizeMode="cover" />
 
+              {/* 본인 사진 삭제 — 좌상단 연하게 */}
               {isOwn && (
-                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteCheckin(item)}>
-                  <Text style={styles.deleteBtnText}>🗑</Text>
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteCheckin(item)} activeOpacity={0.7}>
+                  <Text style={styles.deleteBtnText}>✕</Text>
                 </TouchableOpacity>
               )}
+
+              {/* 💪 좋아요 — 우하단 overlay */}
+              <TouchableOpacity style={styles.likeBtn} onPress={() => toggleLike(item.id)} activeOpacity={0.8}>
+                <Text style={[styles.likeEmoji, liked && styles.likeEmojiActive]}>💪</Text>
+                {likeCount > 0 && <Text style={[styles.likeCount, liked && styles.likeCountActive]}>{likeCount}</Text>}
+              </TouchableOpacity>
 
               <View style={styles.cardFooter}>
                 <Text style={styles.cardName} numberOfLines={1}>{item.display_name}</Text>
                 <Text style={styles.cardTime}>
                   {new Date(item.checked_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
                 </Text>
-              </View>
-
-              <View style={styles.reactionRow}>
-                {EMOJIS.map(emoji => {
-                  const count = (checkinReactions[emoji] ?? []).length;
-                  const reacted = (checkinReactions[emoji] ?? []).includes(userId);
-                  return (
-                    <TouchableOpacity key={emoji} style={[styles.reactionBtn, reacted && styles.reactionBtnActive]} onPress={() => toggleReaction(item.id, emoji)} activeOpacity={0.7}>
-                      <Text style={styles.reactionEmoji}>{emoji}</Text>
-                      {count > 0 && <Text style={[styles.reactionCount, reacted && styles.reactionCountActive]}>{count}</Text>}
-                    </TouchableOpacity>
-                  );
-                })}
               </View>
             </View>
           );
@@ -230,25 +225,24 @@ const styles = StyleSheet.create({
   },
   photo: { width: '100%', aspectRatio: 1, backgroundColor: '#F2F2F7' },
   deleteBtn: {
-    position: 'absolute', top: 8, right: 8,
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12,
-    width: 28, height: 28, alignItems: 'center', justifyContent: 'center',
+    position: 'absolute', top: 7, left: 7,
+    backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10,
+    width: 24, height: 24, alignItems: 'center', justifyContent: 'center',
   },
-  deleteBtnText: { fontSize: 13 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 },
+  deleteBtnText: { fontSize: 11, color: '#fff', fontWeight: '600' },
+  likeBtn: {
+    position: 'absolute', bottom: 36, right: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.28)', borderRadius: 12,
+    paddingHorizontal: 7, paddingVertical: 4,
+  },
+  likeEmoji: { fontSize: 14, opacity: 0.7 },
+  likeEmojiActive: { opacity: 1 },
+  likeCount: { fontSize: 11, color: '#fff', fontWeight: '700' },
+  likeCountActive: { color: '#FFD0D0' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8 },
   cardName: { fontSize: 12, fontWeight: '700', color: '#111', flex: 1 },
   cardTime: { fontSize: 11, color: '#bbb' },
-  reactionRow: { flexDirection: 'row', paddingHorizontal: 8, paddingBottom: 9, gap: 4 },
-  reactionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    paddingHorizontal: 6, paddingVertical: 3,
-    backgroundColor: '#F5F5F5', borderRadius: 10,
-    borderWidth: 1, borderColor: 'transparent',
-  },
-  reactionBtnActive: { backgroundColor: '#FFF0F0', borderColor: '#FFCDD0' },
-  reactionEmoji: { fontSize: 13 },
-  reactionCount: { fontSize: 11, color: '#888', fontWeight: '600' },
-  reactionCountActive: { color: '#FF5A5F' },
   empty: { paddingTop: 80, alignItems: 'center', paddingHorizontal: 40 },
   emptyEmoji: { fontSize: 44, marginBottom: 14 },
   emptyText: { fontSize: 14, color: '#bbb', textAlign: 'center', lineHeight: 22 },
