@@ -44,3 +44,6 @@ yarn-error.*
 
 # APK builds
 builds/
+
+# Local builds (Google Drive에 따로 관리)
+builds/
