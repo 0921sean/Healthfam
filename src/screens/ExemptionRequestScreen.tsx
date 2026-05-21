@@ -60,7 +60,7 @@ export function ExemptionRequestScreen({ groupId, userId, onDone }: Props) {
 
     const { data: groupData } = await supabase
       .from('groups')
-      .select('weekly_target')
+      .select('weekly_target, created_by')
       .eq('id', groupId)
       .single();
 
@@ -71,7 +71,7 @@ export function ExemptionRequestScreen({ groupId, userId, onDone }: Props) {
       year,
       reason,
       reason_detail: detail.trim() || null,
-      reduced_target: groupData?.weekly_target ?? 0, // 방장이 나중에 조정
+      reduced_target: groupData?.weekly_target ?? 0,
       status: 'pending',
     });
 
@@ -80,6 +80,33 @@ export function ExemptionRequestScreen({ groupId, userId, onDone }: Props) {
     if (error) {
       Alert.alert('오류', '신청에 실패했어요.');
       return;
+    }
+
+    // 방장에게 푸시 알림 전송
+    if (groupData?.created_by) {
+      const { data: adminProfile } = await supabase
+        .from('profiles')
+        .select('display_name, push_token')
+        .eq('id', userId)
+        .single();
+      const { data: adminData } = await supabase
+        .from('profiles')
+        .select('push_token')
+        .eq('id', groupData.created_by)
+        .single();
+      if (adminData?.push_token) {
+        const REASON_KO: Record<string, string> = { military: '군대', travel: '여행', injury: '부상/질병', other: '기타' };
+        fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: adminData.push_token,
+            title: '예외 신청이 들어왔어요 🙏',
+            body: `${adminProfile?.display_name ?? '멤버'}님이 이번 주 예외를 신청했어요. (${REASON_KO[reason ?? ''] ?? reason})`,
+            sound: 'default',
+          }),
+        });
+      }
     }
 
     Alert.alert('신청 완료', '방장이 검토 후 처리할 거예요.', [

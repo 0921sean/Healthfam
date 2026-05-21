@@ -7,6 +7,7 @@ import * as Linking from 'expo-linking';
 
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { registerForPushNotifications } from '../lib/notifications';
 
 import { PhoneScreen } from '../screens/PhoneScreen';
 import { OtpScreen } from '../screens/OtpScreen';
@@ -100,6 +101,16 @@ export function AppNavigator() {
       .single()
       .then(({ data }) => setHasProfile(!!data?.display_name));
   }, [userId]);
+
+  // 푸시 토큰 등록
+  useEffect(() => {
+    if (!userId || !hasProfile) return;
+    registerForPushNotifications().then((token) => {
+      if (token) {
+        supabase.from('profiles').update({ push_token: token }).eq('id', userId);
+      }
+    });
+  }, [userId, hasProfile]);
 
   // 그룹 조회
   useEffect(() => {
