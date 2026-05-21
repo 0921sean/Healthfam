@@ -31,8 +31,14 @@ export async function registerForPushNotifications(): Promise<string | null> {
 
   if (finalStatus !== 'granted') return null;
 
-  const token = (await Notifications.getExpoPushTokenAsync()).data;
-  return token;
+  try {
+    const token = (await Notifications.getExpoPushTokenAsync({
+      projectId: '761d8f5b-8e18-4ab8-bfc9-3f1710260a54',
+    })).data;
+    return token;
+  } catch {
+    return null;
+  }
 }
 
 export function getReminderMessage(
