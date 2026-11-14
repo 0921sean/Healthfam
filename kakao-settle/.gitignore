@@ -1,0 +1,9 @@
+# 벌금 기록과 채팅 로그는 이 맥에만 둔다 (실명·금액 포함)
+penalty_list.txt
+total_penalty.txt
+last_settled_week.txt
+penalty_lists/
+gym_log.txt
+members.py
+auto_settle.log
+__pycache__/

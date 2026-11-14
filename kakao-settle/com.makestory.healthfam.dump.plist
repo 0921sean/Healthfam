@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.makestory.healthfam.dump</string>
+<key>ProgramArguments</key><array><string>/Users/cheonseungbeom/.local/bin/kakaocli</string><string>query</string><string>SELECT 'room', lastLogId, 0, 0, 0, '', '' FROM NTChatRoom WHERE chatId=375704568186036 UNION ALL SELECT 'msg', m.logId, m.prevId, m.sentAt, m.type, COALESCE(NULLIF(u.nickName,''), u.friendNickName, ''), m.message FROM NTChatMessage m LEFT JOIN NTUser u ON u.userId=m.authorId AND u.linkId=0 WHERE m.chatId=375704568186036 AND m.sentAt >= CAST(strftime('%s','now','-100 days') AS INTEGER)</string></array>
+<key>StandardOutPath</key><string>/Users/cheonseungbeom/.kakaocli/healthfam_dump.json</string>
+<key>StandardErrorPath</key><string>/Users/cheonseungbeom/.kakaocli/healthfam_dump.err</string>
+</dict></plist>
