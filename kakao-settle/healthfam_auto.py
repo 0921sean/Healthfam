@@ -11,6 +11,9 @@
 읽기: 예약 작업 com.makestory.healthfam.dump 가 kakaocli로 방의 메시지를 파일로 뽑고, 이 스크립트는 그 파일만 읽습니다.
       (macOS가 카카오톡 DB 접근 권한을 kakaocli에만 인정하기 때문에 Python이 kakaocli를 직접 부르면 허용 창이 뜹니다.)
 전송: kmsg-safe (카카오톡 화면 자동화)
+
+면제: 아프거나 해서 그 주 정산에서 빼 줄 사람은 exemptions.txt 에 한 줄씩 적습니다. (형식: "YYYY-MM-DD 이름 [이름 ...]  # 사유")
+      날짜는 그 주에 속한 아무 날이나 됩니다. 면제된 사람은 "이름: 0/0"으로 표시되고 벌금이 없습니다.
 """
 
 import argparse
@@ -36,6 +39,8 @@ from healthfam import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "last_settled_week.txt")  # 마지막으로 정산한 주의 월요일 (YYYY-MM-DD)
 LOG_FILE = os.path.join(BASE_DIR, "auto_settle.log")
+EXEMPT_FILE = os.path.join(BASE_DIR, "exemptions.txt")  # 주차별 면제자
+EXEMPT = -1  # healthfam.py 가 "0/0", 벌금 0원으로 처리하는 값
 
 DUMP_JOB = "com.makestory.healthfam.dump"
 DUMP_FILE = os.path.expanduser("~/.kakaocli/healthfam_dump.json")
@@ -117,8 +122,30 @@ def check_db_complete(room_last, messages, week):
     return None
 
 
-def count_week(messages, week):
-    """한 주(월 00:00 ~ 다음 월 00:00)의 멤버별 운동 횟수. 멤버가 마지막으로 올린 N/3의 N."""
+def load_exemptions():
+    """exemptions.txt 를 읽어 {주의 월요일: {이름, ...}} 로 돌려준다. 형식이 틀리면 정산을 멈춘다."""
+    exemptions = {}
+    if not os.path.exists(EXEMPT_FILE):
+        return exemptions
+    with open(EXEMPT_FILE, encoding="utf-8") as f:
+        for number, raw in enumerate(f, 1):
+            parts = raw.split("#", 1)[0].split()
+            if not parts:
+                continue
+            try:
+                week = monday_of(datetime.date.fromisoformat(parts[0]))
+            except ValueError:
+                raise RuntimeError(f"exemptions.txt {number}번째 줄: 날짜 형식이 잘못됨 ({parts[0]})")
+            names = parts[1:]
+            unknown = [name for name in names if name not in HEALTHFAM_MEMBERS]
+            if not names or unknown:
+                raise RuntimeError(f"exemptions.txt {number}번째 줄: 멤버 이름 확인 필요 ({' '.join(unknown) or '이름 없음'})")
+            exemptions.setdefault(week, set()).update(names)
+    return exemptions
+
+
+def count_week(messages, week, exempt=()):
+    """한 주(월 00:00 ~ 다음 월 00:00)의 멤버별 운동 횟수. 멤버가 마지막으로 올린 N/3의 N. 면제자는 EXEMPT."""
     start, end = week_bounds(week)
     in_week = sorted((m for m in messages if start <= m[2] < end and m[3] in TEXT_TYPES), key=lambda m: (m[2], m[0]))
     counts = {member: 0 for member in HEALTHFAM_MEMBERS}
@@ -126,6 +153,8 @@ def count_week(messages, week):
         match = COUNT_PATTERN.match(message or "")
         if match and name in counts:
             counts[name] = int(match.group(1))
+    for name in exempt:
+        counts[name] = EXEMPT
     return counts, len(in_week)
 
 
@@ -188,8 +217,10 @@ def main():
         sys.exit(1)
 
     total = read_total()
+    exemptions = load_exemptions()
     for week in weeks:
-        counts, message_count = count_week(messages, week)
+        exempt = sorted(exemptions.get(week, ()))
+        counts, message_count = count_week(messages, week, exempt)
         text, penalties = build_message(counts, total)
         label = f"{week:%m.%d}~{week + datetime.timedelta(days=6):%m.%d} 주차"
         if args.dry_run:
@@ -209,7 +240,7 @@ def main():
         total = update_total_penalty(penalties)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             f.write(week.isoformat() + "\n")
-        log(f"{label} 정산 전송 완료 (총금액 {total:,}원)")
+        log(f"{label} 정산 전송 완료 (총금액 {total:,}원)" + (f", 면제: {' '.join(exempt)}" if exempt else ""))
 
 
 if __name__ == "__main__":
