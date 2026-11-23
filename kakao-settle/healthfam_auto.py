@@ -14,6 +14,7 @@
 
 면제: 아프거나 해서 그 주 정산에서 빼 줄 사람은 exemptions.txt 에 한 줄씩 적습니다. (형식: "YYYY-MM-DD 이름 [이름 ...]  # 사유")
       날짜는 그 주에 속한 아무 날이나 됩니다. 면제된 사람은 "이름: 0/0"으로 표시되고 벌금이 없습니다.
+제외: 집계에서 뺄 메시지(지난주 운동을 월요일에 늦게 올린 인증 등)는 ignored_messages.txt 에 logId를 한 줄씩 적습니다.
 """
 
 import argparse
@@ -40,6 +41,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "last_settled_week.txt")  # 마지막으로 정산한 주의 월요일 (YYYY-MM-DD)
 LOG_FILE = os.path.join(BASE_DIR, "auto_settle.log")
 EXEMPT_FILE = os.path.join(BASE_DIR, "exemptions.txt")  # 주차별 면제자
+IGNORE_FILE = os.path.join(BASE_DIR, "ignored_messages.txt")  # 집계에서 뺄 메시지의 logId
 EXEMPT = -1  # healthfam.py 가 "0/0", 벌금 0원으로 처리하는 값
 
 DUMP_JOB = "com.makestory.healthfam.dump"
@@ -144,10 +146,40 @@ def load_exemptions():
     return exemptions
 
 
-def count_week(messages, week, exempt=()):
+def load_ignored():
+    """ignored_messages.txt 에 적힌 logId 집합."""
+    ignored = set()
+    if not os.path.exists(IGNORE_FILE):
+        return ignored
+    with open(IGNORE_FILE, encoding="utf-8") as f:
+        for number, raw in enumerate(f, 1):
+            value = raw.split("#", 1)[0].strip()
+            if not value:
+                continue
+            if not value.isdigit():
+                raise RuntimeError(f"ignored_messages.txt {number}번째 줄: logId는 숫자여야 함 ({value})")
+            ignored.add(int(value))
+    return ignored
+
+
+def open_room():
+    """헬스팸 방을 열어 카카오톡이 밀린 메시지를 받아오게 한다.
+
+    맥을 덮어 둔 동안 온 메시지는 방을 열기 전까지 DB에 없고, 방의 최신 logId도 같이 옛날 값이라
+    check_db_complete 로는 알아챌 수 없다. (11/16 주차 정산이 일요일 밤 인증 2건을 빼고 올라간 원인)
+    """
+    result = subprocess.run([KMSG, "read", "--chat-id", KMSG_ROOM, "--limit", "5"], capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"방 열기 실패: {(result.stdout + result.stderr).strip()[-300:]}")
+
+
+def count_week(messages, week, exempt=(), ignored=()):
     """한 주(월 00:00 ~ 다음 월 00:00)의 멤버별 운동 횟수. 멤버가 마지막으로 올린 N/3의 N. 면제자는 EXEMPT."""
     start, end = week_bounds(week)
-    in_week = sorted((m for m in messages if start <= m[2] < end and m[3] in TEXT_TYPES), key=lambda m: (m[2], m[0]))
+    in_week = sorted(
+        (m for m in messages if start <= m[2] < end and m[3] in TEXT_TYPES and m[0] not in ignored),
+        key=lambda m: (m[2], m[0]),
+    )
     counts = {member: 0 for member in HEALTHFAM_MEMBERS}
     for _, _, _, _, name, message in in_week:
         match = COUNT_PATTERN.match(message or "")
@@ -176,9 +208,15 @@ def read_total():
 
 
 def send(chat_id, text):
-    result = subprocess.run([KMSG, "send", "--chat-id", chat_id, text], capture_output=True, text=True, timeout=120)
-    output = (result.stdout + result.stderr).strip()
-    if result.returncode != 0 or "Message sent" not in output:
+    for attempt in (1, 2):
+        result = subprocess.run([KMSG, "send", "--chat-id", chat_id, text], capture_output=True, text=True, timeout=120)
+        output = (result.stdout + result.stderr).strip()
+        if result.returncode == 0 and "Message sent" in output:
+            return
+        # 창을 못 찾은 경우는 아직 아무것도 보내지 않은 상태라 한 번 더 시도해도 중복 전송이 안 된다
+        if attempt == 1 and ("[WINDOW_NOT_READY]" in output or "[SEARCH_MISS]" in output):
+            time.sleep(5)
+            continue
         raise RuntimeError(f"kmsg 전송 실패: {output[-300:]}")
 
 
@@ -204,12 +242,13 @@ def main():
     if not weeks:
         return
 
+    if not args.dry_run:
+        open_room()
+        time.sleep(10)
     room_last, messages = load_dump()
     problem = check_db_complete(room_last, messages, weeks[0])
     if problem and not args.dry_run:
-        # 방을 한 번 열어 카카오톡이 밀린 메시지를 받아오게 한 뒤 다시 확인
-        subprocess.run([KMSG, "read", "--chat-id", KMSG_ROOM, "--limit", "5"], capture_output=True, timeout=120)
-        time.sleep(10)
+        time.sleep(20)  # 받아오는 중일 수 있으니 한 번 더 기다렸다 확인
         room_last, messages = load_dump()
         problem = check_db_complete(room_last, messages, weeks[0])
     if problem:
@@ -218,9 +257,10 @@ def main():
 
     total = read_total()
     exemptions = load_exemptions()
+    ignored = load_ignored()
     for week in weeks:
         exempt = sorted(exemptions.get(week, ()))
-        counts, message_count = count_week(messages, week, exempt)
+        counts, message_count = count_week(messages, week, exempt, ignored)
         text, penalties = build_message(counts, total)
         label = f"{week:%m.%d}~{week + datetime.timedelta(days=6):%m.%d} 주차"
         if args.dry_run:

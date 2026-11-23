@@ -8,3 +8,4 @@ members.py
 auto_settle.log
 __pycache__/
 exemptions.txt
+ignored_messages.txt
