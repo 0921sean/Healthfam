@@ -263,12 +263,13 @@ def main():
         counts, message_count = count_week(messages, week, exempt, ignored)
         text, penalties = build_message(counts, total)
         label = f"{week:%m.%d}~{week + datetime.timedelta(days=6):%m.%d} 주차"
+        text = f"{label} 정산\n{text}"  # 첫 줄에 어느 주 정산인지 적는다
         if args.dry_run:
             print(f"--- {label} (메시지 {message_count}개) ---\n{text}\n")
             total += sum(penalties.values())
             continue
         if args.to_self:
-            send(KMSG_SELF, f"[테스트] {label}\n{text}")
+            send(KMSG_SELF, f"[테스트] {text}")
             log(f"{label} 나와의 채팅으로 테스트 전송")
             total += sum(penalties.values())
             continue
